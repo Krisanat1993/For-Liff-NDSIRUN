@@ -76,6 +76,20 @@
   </div>
 
   <script>
+// =================================================================
+        // โค้ดที่เพิ่มเข้ามาเพื่อแก้ไขปัญหา Cache ของ LIFF
+        // =================================================================
+        const originalFetch = window.fetch;
+        window.fetch = async function(url, options) {
+            if (url.toString().startsWith('https://liffsdk.line-scdn.net/') && url.toString().endsWith('.json')) {
+                url = url + '?ts=' + Math.random();
+            }
+            return originalFetch(url, options);
+        };
+        // =================================================================
+
+
+    
     const liffId = "2006444340-aWbEZ8z4"; // ตรวจสอบ LIFF ID ของคุณ
     const scriptURL = "https://script.google.com/macros/s/AKfycbx8wJRbQlRMuV880LX2jK6LqARQmLYbWmn46AzpkT7eyQa_uk-fXdGsZ1l9wOiZx4etTA/exec"; // ตรวจสอบว่าเป็น URL ล่าสุดและถูกต้อง
     let formData = {};

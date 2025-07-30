@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ระบบส่งระยะเดิน/วิ่ง</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <link href="https://fonts.googleapis.com/css?family=Kanit&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <style>
+    body { font-family: 'Kanit', sans-serif; padding: 20px; }
+    h2, h4 { text-align: center; }
+    .hidden { display: none; }
+    #countdownPopup { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.8); z-index:1000; color:#fff; align-items:center; justify-content:center; }
+    #countdownPopup .content { background:#333; padding:20px; border-radius:8px; text-align:center; }
+    #selectedImagePreviewContainer { margin-top: 10px; text-align: center; }
+    #selectedImagePreview { max-width: 100%; max-height: 200px; border: 1px solid #ddd; margin-top: 5px;}
+  </style>
+</head>
+<body>
+  <div class="container mt-5">
+    <h2 class="mb-4">ระบบส่งระยะเดิน/วิ่ง</h2>
+    <form id="challenge-form">
+      <div class="form-group">
+        <label for="team">🔴 ทีม:</label>
+        <select id="team" class="form-control" disabled>
+          <option value="">กำลังดาวน์โหลดข้อมูล...</option>
+        </select>
+      </div>
+      <!--<div class="form-group">-->
+      <!--  <label for="jocName">🔻 ชื่อ นทน. JOC.10:</label>-->
+      <!--  <select id="jocName" class="form-control" disabled>-->
+      <!--    <option value="">กำลังดาวน์โหลดข้อมูล...</option>-->
+      <!--  </select>-->
+      <!--</div>-->
+      <div class="form-group">
+        <label for="officerName">🔻 ชื่อ ข้าราชการ:</label>
+        <input id="officerName" type="text" class="form-control" placeholder="กรอกชื่อ ข้าราชการ สศท.สปท." required>
+      </div>
+      <div class="form-group">
+        <label for="distance">🔻 ระยะเดิน/วิ่ง (กม.):</label>
+        <input id="distance" type="number" class="form-control" placeholder="กรอกระยะ (เช่น 5.2)" step="0.1" required>
+      </div>
+      <div class="form-group">
+        <label for="imageUpload">🖼️ อัพโหลดภาพผลการเดิน/วิ่ง (ถ้ามี):</label>
+        <input type="file" id="imageUpload" class="form-control-file" accept="image/*">
+        <div id="selectedImagePreviewContainer" class="hidden" style="margin-top: 10px; text-align: center;">
+          <p>ภาพตัวอย่างที่เลือก:</p>
+          <img id="selectedImagePreview" src="#" alt="Selected Image Preview" style="max-width: 100%; max-height: 200px; border: 1px solid #ddd; margin-top: 5px;"/>
+        </div>
+      </div>
+      <button type="button" id="preview-button" class="btn btn-primary btn-block" onclick="previewData()">แสดงตัวอย่าง</button>
+    </form>
+
+    <div id="confirmation-container" class="hidden mt-4">
+      <h4>สรุปข้อมูลที่กรอก</h4>
+      <ul id="data-summary" class="list-group mb-3"></ul>
+      <div class="d-flex justify-content-around">
+        <button class="btn btn-success" onclick="submitData()">ยืนยันส่ง</button>
+        <button class="btn btn-secondary" onclick="editData()">แก้ไข</button>
+      </div>
+    </div>
+
+    <div id="success-section" class="hidden mt-4 text-center">
+      <h4>ส่งข้อมูลเรียบร้อย</h4>
+      <p id="successMessage"></p>
+      </div>
+
+    <div id="error-message" class="alert alert-danger text-center hidden">เกิดข้อผิดพลาด โปรดลองใหม่</div>
+  </div>
+
+  <div id="countdownPopup">
+    <div class="content">
+      กรุณารอ <span id="countdownTimer">10</span> วินาทีก่อนทำรายการใหม่
+    </div>
+  </div>
+
+  <script>
+    const liffId = "2006444340-aWbEZ8z4"; // ตรวจสอบ LIFF ID ของคุณ
+    const scriptURL = "https://script.google.com/macros/s/AKfycbx8wJRbQlRMuV880LX2jK6LqARQmLYbWmn46AzpkT7eyQa_uk-fXdGsZ1l9wOiZx4etTA/exec"; // ตรวจสอบว่าเป็น URL ล่าสุดและถูกต้อง
+    let formData = {};
+    let selectedImageFile = null;
+    let selectedImageBase64 = null;
+
+
+    async function populateDropdown(sheet, column, selectId) {
+      const sel = document.getElementById(selectId);
+      try {
+        const res = await fetch(`${scriptURL}?action=getDropdown&sheet=${encodeURIComponent(sheet)}&column=${encodeURIComponent(column)}`);
+        if (!res.ok) throw new Error(`Network error: ${res.status} ${res.statusText}`);
+        const list = await res.json();
+        if (list.status === 'error') throw new Error(list.message || 'Error from Apps Script');
+        sel.innerHTML = `<option value="">-- เลือก --</option>`;
+        list.forEach(item => {
+          const opt = document.createElement('option');
+          opt.value = item;
+          opt.text = item;
+          sel.appendChild(opt);
+        });
+      } catch (error) {
+        console.error(`Failed to populate dropdown ${selectId}:`, error);
+        sel.innerHTML = `<option value="">โหลดข้อมูลไม่สำเร็จ</option>`;
+      } finally {
+        sel.disabled = false;
+      }
+    }
+
+    liff.init({ liffId })
+      .then(async () => {
+        const previewButton = document.getElementById('preview-button');
+        previewButton.disabled = true;
+        previewButton.innerText = 'กำลังโหลดข้อมูลฟอร์ม...';
+        try {
+          await Promise.all([
+            populateDropdown('ฐานข้อมูล', 'A', 'team'),
+            // populateDropdown('ฐานข้อมูล', 'B', 'jocName')
+          ]);
+        } catch (error) {
+          console.error("Error during dropdown population:", error);
+        } finally {
+          previewButton.disabled = false;
+          previewButton.innerText = 'แสดงตัวอย่าง';
+        }
+      })
+      .catch(err => {
+        console.error("LIFF Initialization Error:", err);
+        document.getElementById('team').innerHTML = `<option value="">ข้อผิดพลาด LIFF</option>`;
+        document.getElementById('jocName').innerHTML = `<option value="">ข้อผิดพลาด LIFF</option>`;
+        document.getElementById('preview-button').innerText = 'LIFF มีปัญหา';
+        document.getElementById('preview-button').disabled = true;
+      });
+
+    document.getElementById('imageUpload').addEventListener('change', function(event) {
+      const file = event.target.files[0];
+      const previewContainer = document.getElementById('selectedImagePreviewContainer');
+      const previewImage = document.getElementById('selectedImagePreview');
+
+      if (file) {
+        selectedImageFile = file;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          previewImage.src = e.target.result;
+          selectedImageBase64 = e.target.result;
+          previewContainer.classList.remove('hidden');
+        }
+        reader.readAsDataURL(file);
+      } else {
+        selectedImageFile = null;
+        selectedImageBase64 = null;
+        previewImage.src = '#';
+        previewContainer.classList.add('hidden');
+      }
+    });
+
+    function previewData() {
+      const team = document.getElementById('team').value;
+    //   const jocName = document.getElementById('jocName').value;
+      const officerName = document.getElementById('officerName').value;
+      const distance = document.getElementById('distance').value;
+
+      if (!team || !distance || parseFloat(distance) <= 0) {
+        alert('กรุณากรอกข้อมูลให้ครบถ้วน: ทีม และระยะทางต้องมากกว่า 0 (ชื่อ นทน. JOC.10 และ ชื่อ ข้าราชการ สศท.สปท. สามารถเว้นว่างได้หากไม่จำเป็น)');
+        return;
+      }
+    //   if (!officerName && !jocName) { // เพิ่มเงื่อนไขนี้
+       if (!officerName ) { // เพิ่มเงื่อนไขนี้
+
+        alert('กรุณากรอก "ชื่อ ข้าราชการ" ');
+        return;
+      }
+
+
+      formData = {
+        Timestamp: new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }),
+        team: team,
+        // jocName: jocName || '(ไม่ได้ระบุ)',
+        officerName: officerName || '(ไม่ได้ระบุ)',
+        distance: distance,
+        imageName: selectedImageFile ? selectedImageFile.name : '(ไม่ได้เลือกภาพ)'
+      };
+      const summary = document.getElementById('data-summary');
+      summary.innerHTML = '';
+      Object.entries(formData).forEach(([k,v]) => {
+        const li = document.createElement('li'); li.className = 'list-group-item';
+        let keyDisplay = k;
+        // if (k === 'jocName') keyDisplay = 'ชื่อ นทน. JOC.10';
+        if (k === 'officerName') keyDisplay = 'ชื่อ ข้าราชการ';
+        else if (k === 'team') keyDisplay = 'ทีม';
+        else if (k === 'distance') keyDisplay = 'ระยะทาง (กม.)';
+        else if (k === 'imageName') keyDisplay = 'ภาพที่เลือก';
+        else if (k === 'Timestamp') keyDisplay = 'เวลาที่บันทึก';
+
+        li.innerHTML = `<strong>${keyDisplay}:</strong> ${v}`;
+        summary.appendChild(li);
+      });
+      document.getElementById('challenge-form').classList.add('hidden');
+      document.getElementById('confirmation-container').classList.remove('hidden');
+    }
+
+    function editData() {
+      document.getElementById('confirmation-container').classList.add('hidden');
+      document.getElementById('challenge-form').classList.remove('hidden');
+      document.getElementById('error-message').classList.add('hidden');
+    }
+
+    async function fetchSummarySheetData() {
+        console.log("Fetching summary sheet data...");
+        try {
+            const res = await fetch(`${scriptURL}?action=getSummaryResults`); // Ensure GAS has this action
+            if (!res.ok) throw new Error(`Network error fetching summary: ${res.status} ${res.statusText}`);
+            const result = await res.json();
+            if (result.status !== 'success') throw new Error(result.message || 'Failed to fetch summary data from sheet');
+            console.log("Summary sheet data fetched:", result.data);
+            return result.data;
+        } catch (error) {
+            console.error("Error fetching summary sheet data:", error);
+            return null; // Return null on error so submitData can handle it
+        }
+    }
+
+    async function submitData() {
+      const confirmationButton = document.querySelector('#confirmation-container .btn-success');
+      if (confirmationButton) confirmationButton.disabled = true;
+      document.getElementById('error-message').classList.add('hidden');
+      document.getElementById('successMessage').innerText = 'กำลังส่งข้อมูล...';
+      document.getElementById('success-section').classList.remove('hidden');
+      document.getElementById('confirmation-container').classList.add('hidden');
+
+      let lineMessagesToSend = []; // Initialize here
+
+      try {
+        // 1. Prepare Text Data for Google Sheet
+        const textDataForSheet = {
+            Timestamp: formData.Timestamp,
+            team: formData.team,
+            // jocName: formData.jocName,
+            officerName: formData.officerName,
+            distance: formData.distance
+        };
+
+        const payloadForSheet = new FormData();
+        payloadForSheet.append('action', 'submitText');
+        payloadForSheet.append('textData', JSON.stringify(textDataForSheet));
+
+        console.log("Submitting text data to sheet:", textDataForSheet);
+        const resText = await fetch(scriptURL, { method: 'POST', body: payloadForSheet });
+        const resultText = await resText.json();
+        console.log("Response from submitText:", resultText);
+
+        if (resultText.status !== 'success') {
+          throw new Error(resultText.message || 'เกิดข้อผิดพลาดในการส่งข้อมูลตัวอักษรไปยังชีต');
+        }
+        document.getElementById('successMessage').innerText = 'บันทึกข้อมูลตัวอักษรลงชีตเรียบร้อยแล้ว กำลังเตรียมข้อมูลสรุป...';
+
+        // 2. Fetch Summary Data from "สรุปผล" sheet
+        const summarySheetData = await fetchSummarySheetData();
+
+        // 3. Construct the main text message for LINE
+        let detailedLineMessage = "🏃🏻‍♂️🏃🏻‍♂️ การสะสมระยะเดิน/วิ่ง:\n\n";
+        detailedLineMessage += `🔴 ทีม:  ${formData.team}\n`;
+        // detailedLineMessage += `🔻ชื่อ นทน. JOC.10:  ${formData.jocName}\n`;
+        detailedLineMessage += `🔻ชื่อ ข้าราชการ:  ${formData.officerName}\n`;
+        detailedLineMessage += `🔻กรอกระยะเดิน/วิ่ง กม.:  ${formData.distance}\n\n`;
+
+        detailedLineMessage += "🏆 สรุปผล Run Challenge:\n";
+        if (summarySheetData) {
+            detailedLineMessage += `🎯 ระยะ Challenge: ${summarySheetData.challengeGoal !== undefined && summarySheetData.challengeGoal !== null ? summarySheetData.challengeGoal : 'N/A'} กม.\n`;
+detailedLineMessage += `📈 ระยะสะสม: ${
+  summarySheetData.totalAccumulated !== undefined &&
+  summarySheetData.totalAccumulated !== null &&
+  !isNaN(parseFloat(summarySheetData.totalAccumulated))
+    ? parseFloat(summarySheetData.totalAccumulated).toFixed(2)
+    : 'N/A'
+} กม.\n\n`;            if (summarySheetData.teams && summarySheetData.teams.length > 0) {
+                summarySheetData.teams.forEach(team => {
+                    if (team.name) { // Only add team info if name exists
+                        detailedLineMessage += `🔻 ทีม ${team.name || 'N/A'}\n`;
+detailedLineMessage += `    • ระยะทาง: ${
+  team.distance !== undefined &&
+  team.distance !== null &&
+  !isNaN(parseFloat(team.distance))
+    ? parseFloat(team.distance).toFixed(2)
+    : 'N/A'
+} กม.\n`;                        detailedLineMessage += `    • อันดับ: ${team.rank !== undefined && team.rank !== null ? team.rank : 'N/A'}\n\n`;
+                    }
+                });
+            } else {
+                detailedLineMessage += "   (ยังไม่มีข้อมูลทีมในสรุปผล)\n\n";
+            }
+        } else {
+            detailedLineMessage += "⚠️ ไม่สามารถโหลดข้อมูลสรุปผลจากชีตได้ในขณะนี้\n\n";
+        }
+
+        detailedLineMessage += "‼️ลิงก์ส่งสะสมระยะเดิน/วิ่ง: https://liff.line.me/2006444340-aWbEZ8z4\n\n";
+
+        lineMessagesToSend.push({ type: 'text', text: detailedLineMessage });
+
+        // 4. If an image was selected, upload it and add to messages
+        let uploadedImageUrl = null;
+        if (selectedImageFile && selectedImageBase64) {
+          document.getElementById('successMessage').innerText = 'กำลังอัพโหลดรูปภาพ ห้ามปิดหน้านี้จนกว่าจะอัพโหลดสำเร็จ';
+          
+          const imagePayload = new URLSearchParams();
+          imagePayload.append('action', 'uploadImage');
+          imagePayload.append('imageData', selectedImageBase64);
+          imagePayload.append('fileName', selectedImageFile.name);
+          imagePayload.append('mimeType', selectedImageFile.type);
+          imagePayload.append('timestamp', formData.Timestamp);
+
+          console.log("Uploading image data (first 100 chars of base64):", selectedImageBase64.substring(0,100));
+          const resImage = await fetch(scriptURL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: imagePayload.toString()
+          });
+          const resultImage = await resImage.json();
+          console.log("Response from uploadImage:", resultImage);
+
+          if (resultImage.status === 'success' && resultImage.imageUrl) {
+            uploadedImageUrl = resultImage.imageUrl;
+            lineMessagesToSend.push({
+              type: 'image',
+              originalContentUrl: uploadedImageUrl,
+              previewImageUrl: uploadedImageUrl
+            });
+            document.getElementById('successMessage').innerHTML = `ข้อมูลถูกส่งเรียบร้อยแล้ว<br><strong>ภาพถูกอัพโหลดและจะส่งไปยัง LINE</strong>`;
+          } else {
+            let imageErrorMsg = resultImage.message || 'ไม่สามารถอัปโหลดรูปภาพได้';
+             // Modify the first text message to include image upload failure
+            lineMessagesToSend[0].text += `\n\n(⚠️ การอัปโหลดภาพล้มเหลว: ${imageErrorMsg})`;
+            document.getElementById('successMessage').innerHTML = `ข้อมูลตัวอักษรถูกส่งเรียบร้อยแล้ว<br><strong style="color:red;">แต่การอัพโหลดภาพล้มเหลว: ${imageErrorMsg}</strong>`;
+          }
+        } else {
+            document.getElementById('successMessage').innerHTML = `ข้อมูลถูกส่งเรียบร้อยแล้ว<br>(ไม่ได้แนบรูปภาพ)`;
+        }
+
+        // 5. Send messages to LINE
+        if (liff.isInClient() && lineMessagesToSend.length > 0) {
+          console.log("Sending messages to LINE:", JSON.stringify(lineMessagesToSend));
+          await liff.sendMessages(lineMessagesToSend);
+        } else if (!liff.isInClient()) {
+            alert("อยู่นอกแอพ LINE จะไม่สามารถส่งข้อความได้ แต่ข้อมูลถูกบันทึกลงชีตแล้ว (ถ้ามี)\n" + JSON.stringify(lineMessagesToSend, null, 2));
+        }
+
+        document.getElementById('challenge-form').classList.add('hidden');
+        // Update success message to reflect everything is done.
+        let finalSuccessMsg = "ดำเนินการทั้งหมดเรียบร้อย!\n";
+        finalSuccessMsg += `ทีม: ${formData.team}, ชื่อ ขรก.: ${formData.officerName}, ระยะ: ${formData.distance} กม.`;
+        if(uploadedImageUrl) finalSuccessMsg += "\nภาพถูกอัพโหลดแล้ว";
+        else if(selectedImageFile) finalSuccessMsg += "\nการอัพโหลดภาพมีปัญหา";
+        else finalSuccessMsg += "\n(ไม่ได้แนบภาพ)";
+        document.getElementById('successMessage').innerHTML = finalSuccessMsg.replace(/\n/g, "<br>");
+
+
+        setTimeout(() => {
+          if (liff.isInClient()) {
+            liff.closeWindow();
+          }
+        }, 2000); // Increased timeout to allow user to read final message
+
+      } catch (e) {
+        console.error('Error submitting data:', e);
+        document.getElementById('success-section').classList.add('hidden');
+        document.getElementById('error-message').innerText = `เกิดข้อผิดพลาด: ${e.message}. โปรดลองใหม่ หรือตรวจสอบการตั้งค่า GAS.`;
+        document.getElementById('error-message').classList.remove('hidden');
+        document.getElementById('confirmation-container').classList.add('hidden');
+        document.getElementById('challenge-form').classList.remove('hidden');
+      } finally {
+        if (confirmationButton) confirmationButton.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
